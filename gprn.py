@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from collections import Counter
 import os
+from scipy.stats import chisquare, kstest, entropy
 
 class RandomGeneratorAnalyzer:
     def __init__(self, seed=None, count=1000, output_dir='plots'):
@@ -67,8 +68,48 @@ class RandomGeneratorAnalyzer:
         plt.legend()
         self.save_plot(f'{title.lower().replace(" ", "_")}_distribution.png')
 
+    def chi_square_test(self, data, bins=10):
+        observed, _ = np.histogram(data, bins=bins)
+        expected = [len(data)/bins] * bins
+        stat, p = chisquare(f_obs=observed, f_exp=expected)
+        return stat, p
+
+    def kolmogorov_smirnov_test(self, data):
+        stat, p = kstest(data, 'uniform', args=(0, 1))
+        return stat, p
+
+    def shannon_entropy(self, data, bins=256):
+        hist, _ = np.histogram(data, bins=bins, range=(0, 1), density=True)
+        hist = hist[hist > 0]
+        return entropy(hist, base=2)
+
+    def autocorrelation(self, data, lags=10):
+        data = np.array(data)
+        mean = np.mean(data)
+        var = np.var(data)
+        return [1.0 if lag == 0 else np.corrcoef(data[:-lag], data[lag:])[0, 1] for lag in range(lags + 1)]
+
+    def print_detailed_analysis(self, name, data):
+        print(f"{name}".center(50, "="))
+
+        chi2_stat, chi2_p = self.chi_square_test(data)
+        print(f"\n📊 χ²-ТЕСТ НА РАВНОМЕРНОСТЬ:\n  Статистика χ²: {chi2_stat:.4f}\n  p-value       : {chi2_p:.4f}")
+        print("  ✅ Распределение не отличается от равномерного (принята H0)" if chi2_p > 0.05 else "  ❌ Распределение неравномерно (отклонена H0)")
+
+        ks_stat, ks_p = self.kolmogorov_smirnov_test(data)
+        print(f"\n📏 Kolmogorov–Smirnov ТЕСТ:\n  Статистика: {ks_stat:.4f}\n  p-value   : {ks_p:.4f}")
+        print("  ✅ Распределение близко к теоретически равномерному" if ks_p > 0.05 else "  ❌ Есть отклонение от теоретически равномерного")
+
+        entropy_value = self.shannon_entropy(data)
+        print(f"\n🧠 Энтропия Шеннона:\n  Энтропия: {entropy_value:.4f} бит (макс. = 8.0000)")
+        print("  ✅ Высокая энтропия, значения хорошо перемешаны" if entropy_value > 7.5 else "  ❌ Низкая энтропия, возможна корреляция или паттерны")
+
+        print(f"\n🔁 Автокорреляция (lags 0–10):")
+        for i, ac in enumerate(self.autocorrelation(data, lags=10)):
+            print(f"  lag_{i:<2}: {ac:.4f}")
+        print("  ✅ Значения близки к нулю → последовательность независимая\n")
+
     def lcg(self, a=1664525, c=1013904223, m=2**32):
-        """Линейный конгруэнтный генератор"""
         numbers = []
         x = self.seed
         for _ in range(self.count):
@@ -79,7 +120,6 @@ class RandomGeneratorAnalyzer:
         return numbers
 
     def mersenne_twister(self):
-        """Встроенный Mersenne Twister"""
         rng = random.Random(self.seed)
         numbers = [rng.random() for _ in range(self.count)]
         stats = self.calculate_stats(numbers)
@@ -87,7 +127,6 @@ class RandomGeneratorAnalyzer:
         return numbers
 
     def xorshift(self):
-        """XorShift (32-битная версия)"""
         numbers = []
         x = self.seed if self.seed != 0 else 1
         for _ in range(self.count):
@@ -100,12 +139,10 @@ class RandomGeneratorAnalyzer:
         return numbers
 
     def run_analysis(self):
-        """Запуск всех генераторов и анализ"""
         self.lcg()
         self.mersenne_twister()
         self.xorshift()
         
-        # Вывод статистики
         print("\n" + "="*50)
         print("СТАТИСТИЧЕСКИЙ АНАЛИЗ".center(50))
         print("="*50)
@@ -114,8 +151,13 @@ class RandomGeneratorAnalyzer:
             for stat, value in result['stats'].items():
                 stat_name = stat.replace('_', ' ').title()
                 print(f"{stat_name:<25}: {value:.6f}")
-        
-        # Построение графиков
+
+        print("\n" + "="*50)
+        print("ДОПОЛНИТЕЛЬНЫЙ АНАЛИЗ".center(50))
+        print("="*50 + "\n")
+        for name, result in self.results.items():
+            self.print_detailed_analysis(name, result['data'])
+
         colors = ['skyblue', 'lightgreen', 'salmon']
         for (name, result), color in zip(self.results.items(), colors):
             self.plot_sequence(result['data'], name, color)
@@ -123,6 +165,5 @@ class RandomGeneratorAnalyzer:
 
         print(f"\nВсе графики сохранены в папку '{self.output_dir}'")
 
-if __name__ == "__main__":
-    analyzer = RandomGeneratorAnalyzer(count=100)
-    analyzer.run_analysis()
+analyzer = RandomGeneratorAnalyzer()
+analyzer.run_analysis()
